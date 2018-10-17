@@ -1,6 +1,8 @@
 #!/usr/local/bin/julia
 
 # Load Julia packages
+using Pkg
+Pkg.activate(".")
 using DataFrames
 #=
 Solutions to precomile errors:
@@ -45,7 +47,7 @@ function readKPPspc(KPPfile::String="MCMv3.3.1.kpp"; folder = "../KPPfiles")
     lines = readlines(f)
     istart = findfirst(occursin.("#DEFVAR", lines)) + 1
     iend   = findlast(occursin.("IGNORE", lines))
-    MCMspecies = strip.(replace.(lines[istart:iend], r"=[ ]*IGNORE[ ]*;" => ""))
+    MCMspecies = strip.([replace(l, r"=[ ]*IGNORE[ ]*;" => "") for l in lines[istart:iend]])
   end
 
   return MCMspecies
@@ -59,8 +61,9 @@ For a `species` name in the nomenclature `old_name` return a `String` with the `
 by using the `spcDB` `DataFrame` with all translations and specifying the MCM `version`
 as `v3.x`.
 """
-function translateSPC(species::AbstractString, old_name::String, new_name::String,
+function translateSPC(species::AbstractString, old_name::String, new_name::String;
   spcDB::DataFrame=MCMdb, version::String="v3.3.1")
+  if species == ""  return "DUMMY"  end # Return empty string as DUMMY
   if version == "v3.3.1"
     i = findfirst(spcDB[Symbol(old_name)] .== species)
   else
@@ -80,5 +83,15 @@ end
 
 # MCMv3.3.1
 MCMdb = readDB()
-MCMspecies = readKPPspc()
-MCMgecko = translateSPC.(MCMspecies, "MCMname", "GECKO-A")
+MCMv33species = readKPPspc()
+MCMv33gecko = translateSPC.(MCMv33species, "MCMname", "GECKO-A")
+
+# MCMv3.2
+MCMv32species = readKPPspc("MCMv3.2.kpp")
+MCMv32gecko = translateSPC.(MCMv32species, "MCMname", "GECKO-A", version = "v3.2")
+
+# MCMv3.1
+MCMv31species = readKPPspc("MCMv3.1.kpp")
+MCMv31gecko = translateSPC.(MCMv31species, "MCMname", "GECKO-A", version = "v3.1")
+
+println("done.")
