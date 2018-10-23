@@ -47,6 +47,8 @@ function readKPPspc(KPPfile::String; folder::String = "KPPfiles")
     lines = readlines(f)
     idx   = findall(occursin.("IGNORE", lines))
     MCMspecies = strip.([replace(l, r"=[ ]*IGNORE[ ]*;" => "") for l in lines[idx]])
+    idx   = findall(MCMspecies.=="")
+    deleteat!(MCMspecies, idx)
   end
 
   return MCMspecies
@@ -81,9 +83,9 @@ end
 
 
 """
-    readRO2(KPPfile::String="MCMv3.3.1.kpp"; folder::String="KPPfiles")
+    readRO2(KPPfile::String; folder::String="KPPfiles")
 
-Retrieve all RO2 species (MCM names) from a default or specified `folder`/`KPPfile`
+Retrieve all RO2 species (MCM names) from a `KPPfile` in a default or specified `folder`
 and return the names as a Vector of strings.
 """
 function readRO2(KPPfile::String; folder::String="KPPfiles")
@@ -129,26 +131,129 @@ end
 
 
 """
-    RO2conflicts(RO2searchDB::Vector{String}, RO2SPClist::Vector{String})
+    conflicts(RO2searchDB::Union{Vector{String}, Vector{SubString{String}}}, RO2SPClist::Union{Vector{String}, Vector{SubString{String}}})
 
 Find all conflicts for RO2 in the KPP sum or the mechanism from a list of RO2 (`RO2SPClist`)
 compared to a list (`RO2RO2searchDB`).
 """
-function RO2conflicts(RO2searchDB::Vector{String}, RO2SPClist::Vector{String})
-  RO2returnDB = String[]
-  for ro2 in RO2SPClist
-    if all(RO2searchDB .≠ ro2)
-      println("RO₂ conflict: $ro2")
-      push!(RO2returnDB, ro2)
+function conflicts(searchDB::Union{Vector{String}, Vector{SubString{String}}},
+  SPClist::Union{Vector{String}, Vector{SubString{String}}})
+  returnDB = String[]
+  for spc in SPClist
+    if all(searchDB .≠ spc)
+      println("Species conflict: $spc")
+      push!(returnDB, spc)
     end
   end
 
-  return RO2returnDB
+  return returnDB
 end
 
 
+"""
+checkFAC(FACfile::String, MCMspecies::Union{Vector{String}, Vector{SubString{String}}}, RO2mcm::Union{Vector{String}, Vector{SubString{String}}}; folder::String="FACfiles")
+
+From a `FACfile` in a default or specified `folder`, read all species and RO2 definitions
+and compare them to the arrays of `MCMspecies` and `RO2mcm` with the KPP file definitions.
+
+Returns `String` arrays with FAC species and RO2 names and a tuple with booleans,
+whether differences where found for species and RO2, respectively.
+"""
+function checkFAC(FACfile::String, MCMspecies::Union{Vector{String}, Vector{SubString{String}}},
+  RO2mcm::Union{Vector{String}, Vector{SubString{String}}}; folder::String="FACfiles")
+  # Initialise
+  FACspecies = String[]; RO2fac = String[]
+  SPCflag = true; RO2flag = true
+  open(joinpath(pwd(),folder,FACfile)) do f
+    # Read FAC file
+    lines = readlines(f)
+    # Find species definitions
+    varstart = findfirst(lines.=="VARIABLE") + 1
+    varend = findnext(occursin.(";", lines), varstart)
+    lines[varend] = replace(lines[varend], ";" => "")
+    FACspc = split.(lines[varstart:varend])
+    for line in FACspc, spc in line
+      push!(FACspecies, strip(spc))
+    end
+    # Compare to KPP file and warn, if different
+    SPCflag = sort(MCMspecies) ≠ sort(FACspecies)
+    if SPCflag
+      println("WARNING! Different species lists for KPP and FAC file!")
+    end
+    # Find RO2 definitions
+    ro2start = findfirst([occursin(r"RO2[ ]*=", l) for l in lines])
+    ro2end = findnext(occursin.(";", lines), ro2start)
+    lines[ro2start] = replace(lines[ro2start], r"RO2[ ]*=" => "")
+    lines[ro2end] = replace(lines[ro2end], ";" => "")
+    for line in lines[ro2start:ro2end]
+      ro2line = split(line,"+")
+      for ro2 in ro2line
+        if strip(ro2) ≠ ""
+          push!(RO2fac, strip(ro2))
+        end
+      end
+    end
+    # Compare to KPP file and warn, if different
+    RO2flag = sort(RO2fac) ≠ sort(RO2mcm)
+    if RO2flag
+      println("WARNING! Different RO2 lists for KPP and FAC file!")
+    end
+  end
+
+  return FACspecies, RO2fac, (SPCflag, RO2flag)
+end
+
+
+"""
+    FACvsKPP(flag::Tuple{Bool, Bool}, MCMspecies::Union{Vector{String}, Vector{SubString{String}}},
+      FACspecies::Union{Vector{String}, Vector{SubString{String}}},
+      MCMro2::Union{Vector{String}, Vector{SubString{String}}},
+      FACro2::Union{Vector{String}, Vector{SubString{String}}},
+      version::String)
+
+If the respective `flag` is true, compare the respective MCM and FAC species and/or RO2
+and print missing species in either file to a warning output file labelled with the
+specified `version` of the MCM mechanism.
+"""
+function FACvsKPP(flag::Tuple{Bool, Bool}, MCMspecies::Union{Vector{String}, Vector{SubString{String}}},
+  FACspecies::Union{Vector{String}, Vector{SubString{String}}},
+  MCMro2::Union{Vector{String}, Vector{SubString{String}}},
+  FACro2::Union{Vector{String}, Vector{SubString{String}}},
+  version::String)
+
+  if flag[1]
+    SPCmissing  = conflicts(FACspecies, MCMspecies)
+    SPCconflict = conflicts(MCMspecies, FACspecies)
+    open("conflicts_species_MCM$version.dat", "w") do f
+      if !isempty(SPCmissing)
+        println(f, "The following KPP species definitions are missing in the FAC file:")
+        println(f, join(SPCmissing, ", "), '\n')
+      end
+      if !isempty(SPCconflict)
+        println(f, "The following FAC species definitions are missing in the KPP file:")
+        println(f, join(SPCconflict, ", "), '\n')
+      end
+    end
+  end
+  if flag[2]
+    RO2missing  = conflicts(FACro2, MCMro2)
+    RO2conflict = conflicts(MCMro2, FACro2)
+    open("conflicts_RO2_MCM$version.dat", "w") do f
+      if !isempty(RO2missing)
+        println(f, "The following KPP species definitions are missing in the FAC file:")
+        println(f, join(RO2missing, ", "), '\n')
+      end
+      if !isempty(RO2conflict)
+        println(f, "The following FAC species definitions are missing in the KPP file:")
+        println(f, join(RO2conflict, ", "), '\n')
+      end
+    end
+  end
+end
+
 
 ### MCMv3.3.1 ###
+println("Checking MCMv3.3.1...")
 # Read databases and KPP files to find and analyse RO2 in the MCM mechanism and the RO2 sum
 MCMdb = readDB()
 MCMv33species = readKPPspc("MCMv3.3.1.kpp")
@@ -158,11 +263,15 @@ RO2mcm33 = findRO2(MCMv33species)
 RO2sum33 = readRO2("MCMv3.3.1.kpp")
 
 # Find missing RO2 and RO2 conflicts
-RO2v33missing = RO2conflicts(RO2sum33, RO2mcm33)
-RO2v33conflicts = RO2conflicts(RO2mcm33, RO2sum33)
+RO2v33missing = conflicts(RO2sum33, RO2mcm33)
+RO2v33conflicts = conflicts(RO2mcm33, RO2sum33)
+# Compare KPP and FAC files
+FACv33species, FACv33ro2, v33flag = checkFAC("MCMv3.3.1.fac", MCMv33species, RO2sum33)
+FACvsKPP(v33flag, MCMv33species, FACv33species, FACv33ro2, RO2sum33, "v3.3.1")
 
 
 ### MCMv3.2 ###
+println("Checking MCMv3.2...")
 # Find current species in mechanism
 MCMv32species = readKPPspc("MCMv3.2.kpp")
 
@@ -171,11 +280,16 @@ RO2mcm32 = findRO2(MCMv32species, version = "MCMv3.2")
 RO2sum32 = readRO2("MCMv3.2.kpp")
 
 # Find missing RO2 and RO2 conflicts
-RO2v32missing = RO2conflicts(RO2sum32, RO2mcm32)
-RO2v32conflicts = RO2conflicts(RO2mcm32, RO2sum32)
+RO2v32missing = conflicts(RO2sum32, RO2mcm32)
+RO2v32conflicts = conflicts(RO2mcm32, RO2sum32)
+# Compare KPP and FAC files
+FACv32species, FACv32ro2, v32flag = checkFAC("MCMv3.2.fac", MCMv32species, RO2sum32)
+intersect(MCMv32species, FACv32species)
+FACvsKPP(v32flag, MCMv32species, FACv32species, FACv32ro2, RO2sum32, "v3.2")
 
 
 ### MCMv3.1 ###
+println("Checking MCMv3.1...")
 # Find current species in mechanism
 MCMv31species = readKPPspc("MCMv3.1.kpp")
 
@@ -184,10 +298,14 @@ RO2mcm31 = findRO2(MCMv31species, version = "MCMv3.1")
 RO2sum31 = readRO2("MCMv3.1.kpp")
 
 # Find missing RO2 and RO2 conflicts
-RO2v31missing = RO2conflicts(RO2sum31, RO2mcm31)
-RO2v31conflicts = RO2conflicts(RO2mcm31, RO2sum31)
+RO2v31missing = conflicts(RO2sum31, RO2mcm31)
+RO2v31conflicts = conflicts(RO2mcm31, RO2sum31)
+# Compare KPP and FAC files
+FACv31species, FACv31ro2, v31flag =
+  checkFAC("MCMv3.1.fac", MCMv31species, RO2sum31)
+FACvsKPP(v31flag, MCMv31species, FACv31species, FACv31ro2, RO2sum31, "v3.1")
 
-
+println("Print results to output files \'RO2conflicts.dat\`.")
 # Print conflicts to file
 open("RO2conflicts.dat", "w") do f
   if !isempty(RO2v33missing)
