@@ -1,7 +1,7 @@
 name = "countMCM"
 uuid = "b0d76542-d259-11e8-0140-cd95bdfe5a80"
 authors = ["Peter Bräuer <pb866@york.ac.uk>"]
-version = "0.1.0-DEV"
+version = "0.1.0"
 
 [deps]
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
