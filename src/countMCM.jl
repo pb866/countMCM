@@ -4,6 +4,7 @@
 using Pkg
 Pkg.activate(normpath(joinpath(Base.source_dir(),"..")))
 using DataFrames
+using filehandling
 #=
 Solutions to precomile errors:
 • Build package "CodecZlib" (run `build "CodecZlib"` in the package manager)
@@ -296,14 +297,20 @@ MCMv31species = readKPPspc("MCMv3.1.kpp")
 # Define RO2 in the RO2 sum and the mechanism
 RO2mcm31 = findRO2(MCMv31species, version = "MCMv3.1")
 RO2sum31 = readRO2("MCMv3.1.kpp")
+RO2sum31Leeds = readRO2("MCMv3.1_Leeds.kpp")
 
 # Find missing RO2 and RO2 conflicts
 RO2v31missing = conflicts(RO2sum31, RO2mcm31)
 RO2v31conflicts = conflicts(RO2mcm31, RO2sum31)
+RO2v31missingLeeds = conflicts(RO2sum31Leeds, RO2mcm31)
+RO2v31conflictsLeeds = conflicts(RO2mcm31, RO2sum31Leeds)
 # Compare KPP and FAC files
 FACv31species, FACv31ro2, v31flag =
   checkFAC("MCMv3.1.fac", MCMv31species, RO2sum31)
-FACvsKPP(v31flag, MCMv31species, FACv31species, FACv31ro2, RO2sum31, "v3.1")
+FACvsKPP(v31flag, MCMv31species, FACv31species, FACv31ro2, RO2sum31, "v3.1 (Legacy)")
+FACv31speciesLeeds, FACv31ro2Leeds, v31flagLeeds =
+  checkFAC("MCMv3.1.fac", MCMv31species, RO2sum31Leeds)
+FACvsKPP(v31flagLeeds, MCMv31species, FACv31species, FACv31ro2, RO2sum31Leeds, "v3.1 (Leeds)")
 
 println("Print results to output files \'RO2conflicts.dat\`.")
 # Print conflicts to file
@@ -332,6 +339,28 @@ open("RO2conflicts.dat", "w") do f
     println(f, "The following RO2 should not be in the summation of MCMv3.1:")
     println(f, join(RO2v31conflicts, ", "),"\n")
   end
+  if !isempty(RO2v31missingLeeds)
+    println(f, "The following RO2 are missing in the summation of MCMv3.1:")
+    println(f, join(RO2v31missingLeeds, ", "),"\n")
+  end
+  if !isempty(RO2v31conflictsLeeds)
+    println(f, "The following RO2 should not be in the summation of MCMv3.1:")
+    println(f, join(RO2v31conflictsLeeds, ", "),"\n")
+  end
 end
+
+
+# Compare to AtChem
+AtChem = readfile("FACfiles/peroxy-radicals_v3.1")
+
+# Find missing RO2 and RO2 conflicts
+AtChemLeeds = conflicts(RO2sum31Leeds, AtChem)
+LeedsAtChem = conflicts(AtChem, RO2sum31Leeds)
+
+println("There are $(length(AtChemLeeds)) additional RO₂ in AtChem compared to ",
+  "the MCMv3.1 (Leeds).")
+println("There are $(length(LeedsAtChem)) additional RO₂ in the MCMv3.1 (Leeds) ",
+  "compared to AtChem.")
+
 
 println("done.")
